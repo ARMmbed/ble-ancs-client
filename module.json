@@ -1,0 +1,33 @@
+{
+  "name": "ancs-client-demo",
+  "version": "0.0.0",
+  "description": "Demo for the ANCS client.",
+  "keywords": [],
+  "author": "Marcus Chang <marcus.chang@arm.com>",
+  "repository": {
+    "url": "git@github.com:ARMmbed/ancs-client-demo.git",
+    "type": "git"
+  },
+  "homepage": "https://github.com/ARMmbed/ancs-client-demo",
+  "licenses": [
+    {
+      "url": "https://spdx.org/licenses/Apache-2.0",
+      "type": "Apache-2.0"
+    }
+  ],
+  "dependencies": {
+    "mbed-block": "~0.2.5"
+  },
+  "targetDependencies": {
+    "mbed-os": {
+      "mbed-drivers": "~0.9.0"
+    },
+    "mbed-classic": {
+      "mbed-classic": "~0.0.4"
+    },
+    "mbed": {
+      "ble": "marcuschangarm/ble#~0.4.8"
+    }
+  },
+  "bin": "./source"
+}
