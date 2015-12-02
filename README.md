@@ -1,2 +1,2 @@
-# ancs-client-demo
-Demo for the ANCS client.
+# ble-ancs-client
+ANCS client using mbed BLE API.
