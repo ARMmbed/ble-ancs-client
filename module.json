@@ -1,14 +1,14 @@
 {
-  "name": "ancs-client-demo",
+  "name": "ble-ancs-client",
   "version": "0.0.0",
-  "description": "Demo for the ANCS client.",
+  "description": "ANCS client using mbed BLE API.",
   "keywords": [],
   "author": "Marcus Chang <marcus.chang@arm.com>",
   "repository": {
-    "url": "git@github.com:ARMmbed/ancs-client-demo.git",
+    "url": "git@github.com:ARMmbed/ble-ancs-client.git",
     "type": "git"
   },
-  "homepage": "https://github.com/ARMmbed/ancs-client-demo",
+  "homepage": "https://github.com/ARMmbed/ble-ancs-client",
   "licenses": [
     {
       "url": "https://spdx.org/licenses/Apache-2.0",
@@ -16,18 +16,11 @@
     }
   ],
   "dependencies": {
-    "mbed-block": "~0.2.5"
+    "ble": "^2.0.0",
+    "mbed-block": "^1.0.0",
+    "cborg": "^3.0.0"
   },
-  "targetDependencies": {
-    "mbed-os": {
-      "mbed-drivers": "~0.9.0"
-    },
-    "mbed-classic": {
-      "mbed-classic": "~0.0.4"
-    },
-    "mbed": {
-      "ble": "marcuschangarm/ble#~0.4.8"
-    }
-  },
-  "bin": "./source"
+  "testDependencies": {
+    "mbed-drivers": "*"
+  }
 }

@@ -14,9 +14,17 @@
  * limitations under the License.
  */
 
-#include "ANCSClient.h"
+#include "ble-ancs-client/ANCSClient.h"
 
+#include "mbed-drivers/mbed.h"
+
+// control debug output
+#if 1
 #include <stdio.h>
+#define DEBUGOUT(...) { printf(__VA_ARGS__); }
+#else
+#define DEBUGOUT(...) /* nothing */
+#endif // DEBUGOUT
 
 /*****************************************************************************/
 /* NRF51                                                                     */
@@ -39,61 +47,75 @@ static ble_gap_sec_params_t             m_sec_params;
 /* C to C++                                                                  */
 /*****************************************************************************/
 
-ANCSClient* ancsBridge = NULL;
+static ANCSClient* ancsBridge = NULL;
 
-void bridgeCharacteristicDiscoveryCallback(const DiscoveredCharacteristic* characteristicP)
+static void bridgeCharacteristicDiscoveryCallback(const DiscoveredCharacteristic* characteristicP)
 {
     if (ancsBridge)
     {
         ancsBridge->characteristicDiscoveryCallback(characteristicP);
     }
 }
+
+static void bridgeDiscoveryTerminationCallback(Gap::Handle_t handle)
+{
+    if (ancsBridge)
+    {
+        ancsBridge->discoveryTerminationCallback(handle);
+    }
+}
+
+static void bridgeHvxCallback(const GattHVXCallbackParams* params)
+{
+    if (ancsBridge)
+    {
+        ancsBridge->hvxCallback(params);
+    }
+}
+
+static void bridgeLinkSecured(Gap::Handle_t handle, SecurityManager::SecurityMode_t mode)
+{
+    if (ancsBridge)
+    {
+        ancsBridge->linkSecured(handle, mode);
+    }
+}
+
 /*****************************************************************************/
 
 ANCSClient::ANCSClient()
     :   state(0),
         connectionHandle(0),
+        expectedLength(0),
         dataLength(0)
-{}
-
-void ANCSClient::init(Gap::Handle_t connection)
 {
-    // store connection handle
-    connectionHandle = connection;
+    // store object
+    ancsBridge = this;
+}
 
-    // setup ble callbacks
-    BLE ble;
-    ble.init();
+void ANCSClient::init()
+{
+    BLE& ble = BLE::Instance();
 
-    ble.gap().onDisconnection(this, &ANCSClient::whenDisconnected);
-
-    ble.gattClient().onHVX(this, &ANCSClient::hvxCallback);
+    // register callbacks
+    ble.gattClient().onHVX(bridgeHvxCallback);
     ble.gattServer().onDataSent(this, &ANCSClient::dataSent);
+    ble.gattClient().onServiceDiscoveryTermination(bridgeDiscoveryTerminationCallback);
 
     // security
     ble.securityManager().init();
-    ble.securityManager().onSecuritySetupInitiated(this, &ANCSClient::securityInitiated);
-    ble.securityManager().onSecuritySetupCompleted(this, &ANCSClient::securityCompleted);
-    ble.securityManager().onLinkSecured(this, &ANCSClient::linkSecured);
-    ble.securityManager().onSecurityContextStored(this, &ANCSClient::contextStored);
-    ble.securityManager().onPasskeyDisplay(this, &ANCSClient::passkeyDisplay);
+    ble.securityManager().onLinkSecured(bridgeLinkSecured);
+}
 
-    // store object
-    ancsBridge = this;
 
-    // find ANCS service
-    const uint8_t ancs_array[] = {
-        // 7905F431-B5CE-4E99-A40F-4B1E122D00D0
-        0x79, 0x05, 0xF4, 0x31, 0xB5, 0xCE, 0x4E, 0x99,
-        0xA4, 0x0F, 0x4B, 0x1E, 0x12, 0x2D, 0x00, 0xD0
-    };
+void ANCSClient::onConnection(const Gap::ConnectionCallbackParams_t* params)
+{
+    DEBUGOUT("ancs: on connection\r\n");
 
-    const UUID ancs_uuid(ancs_array);
+    // store connection handle
+    connectionHandle = params->handle;
 
-    ble.gattClient().launchServiceDiscovery(connectionHandle,
-                                            NULL,
-                                            bridgeCharacteristicDiscoveryCallback,
-                                            ancs_uuid);
+    BLE& ble = BLE::Instance();
 
     // get current link status
     SecurityManager::LinkSecurityStatus_t securityStatus = SecurityManager::NOT_ENCRYPTED;
@@ -113,7 +135,18 @@ void ANCSClient::init(Gap::Handle_t connection)
     }
     else
     {
-        printf("link already encrypted\r\n");
+        DEBUGOUT("link already encrypted\r\n");
+    }
+}
+
+void ANCSClient::onDisconnection(const Gap::DisconnectionCallbackParams_t* params)
+{
+    if (params->handle == connectionHandle)
+    {
+        DEBUGOUT("disconnected: reset\r\n");
+
+        connectionHandle = 0;
+        state = 0;
     }
 }
 
@@ -145,12 +178,14 @@ void ANCSClient::getNotificationAttribute(uint32_t notificationUID,
         payloadLength = 6;
     }
 
-    BLE ble;
-    ble.gattClient().write(GattClient::GATT_OP_WRITE_REQ,
-                           connectionHandle,
-                           controlPoint.getValueHandle(),
-                           payloadLength,
-                           payload);
+    BLE::Instance().gattClient().write(GattClient::GATT_OP_WRITE_REQ,
+                                       connectionHandle,
+                                       controlPoint.getValueHandle(),
+                                       payloadLength,
+                                       payload);
+
+    dataLength = 0;
+    dataPayload = SharedPointer<BlockStatic>(new BlockDynamic(length));
 }
 
 
@@ -178,7 +213,7 @@ void ANCSClient::hvxCallback(const GattHVXCallbackParams* params)
 
         if (notificationHandler)
         {
-            notificationHandler.call(event);
+            minar::Scheduler::postCallback(notificationHandler.bind(event));
         }
     }
     else if ((params->connHandle == connectionHandle) && (params->handle == dataSource.getValueHandle()))
@@ -186,24 +221,22 @@ void ANCSClient::hvxCallback(const GattHVXCallbackParams* params)
         // dataLength is zero when receiving first fragment
         if (dataLength == 0)
         {
-            uint8_t commandID;
+            // uint8_t commandID;
             uint32_t notificationUID;
-            uint8_t attributeID;
+            // uint8_t attributeID;
 
-            commandID = params->data[0];
+            // commandID = params->data[0];
             notificationUID = params->data[4];
             notificationUID = notificationUID << 8 | params->data[3];
             notificationUID = notificationUID << 16 | params->data[2];
             notificationUID = notificationUID << 24 | params->data[1];
-            attributeID = params->data[5];
+            // attributeID = params->data[5];
 
             dataLength = params->data[7];
             dataLength = dataLength << 8 | params->data[6];
 
-            dataPayload = SharedPointer<Block>(new BlockDynamic(dataLength));
-
             // copy remaining data into newly created buffer
-            dataPayload->memcpy(dataOffset, &(params->data[8]), params->len - 8);
+            dataPayload->memcpy(0, &(params->data[8]), params->len - 8);
 
             dataOffset = params->len - 8;
         }
@@ -216,39 +249,26 @@ void ANCSClient::hvxCallback(const GattHVXCallbackParams* params)
         }
 
         // signal upper layer when all fragments have been received
-        if (dataLength == dataOffset)
+        if (dataOffset >= dataLength)
         {
-            // reset book keeping variables
-            dataLength = 0;
-            dataOffset = 0;
+            dataPayload->setLength(dataLength);
 
             // if callback handler is set, pass sharedpointer buffer to it
             if (dataHandler)
             {
-                dataHandler.call(dataPayload);
+                minar::Scheduler::postCallback(dataHandler.bind(dataPayload));
             }
 
             // clear shared pointer; this frees the dynamic block
-            dataPayload = SharedPointer<Block>();
+            dataPayload = SharedPointer<BlockStatic>();
         }
-    }
-}
-
-void ANCSClient::whenDisconnected(const Gap::DisconnectionCallbackParams_t* params)
-{
-    if (params->handle == connectionHandle)
-    {
-        printf("disconnected: reset\r\n");
-
-        connectionHandle = 0;
-        state = 0;
     }
 }
 
 void ANCSClient::characteristicDiscoveryCallback(const DiscoveredCharacteristic* characteristicP)
 {
-    printf("main: discovered characteristic\r\n");
-    printf("main: uuid: %04X %02X %02X\r\n", characteristicP->getUUID().getShortUUID(),
+    DEBUGOUT("main: discovered characteristic\r\n");
+    DEBUGOUT("main: uuid: %04X %02X %02X\r\n", characteristicP->getUUID().getShortUUID(),
                                                characteristicP->getValueHandle(),
                                                *((uint8_t*)&(characteristicP->getProperties())));
 
@@ -259,21 +279,21 @@ void ANCSClient::characteristicDiscoveryCallback(const DiscoveredCharacteristic*
         notificationSource = *characteristicP;
         state |= FLAG_NOTIFICATION;
 
-        printf("notification source: %02X\r\n", state);
+        DEBUGOUT("notification source: %02X\r\n", state);
     }
     else if (uuid == 0xD8F3)
     {
         controlPoint = *characteristicP;
         state |= FLAG_CONTROL;
 
-        printf("control point: %02X\r\n", state);
+        DEBUGOUT("control point: %02X\r\n", state);
     }
     else if (uuid == 0xC6E9)
     {
         dataSource = *characteristicP;
         state |= FLAG_DATA;
 
-        printf("data source: %02X\r\n", state);
+        DEBUGOUT("data source: %02X\r\n", state);
     }
 
     if (state == (FLAG_NOTIFICATION | FLAG_CONTROL | FLAG_DATA | FLAG_ENCRYPTION))
@@ -289,16 +309,15 @@ void ANCSClient::subscribe()
      * DiscoveredCharacteristic::discoverDescriptors() followed by DiscoveredDescriptor::write(...). */
     uint16_t value = BLE_HVX_NOTIFICATION;
 
-    BLE ble;
     ble_error_t result = BLE_ERROR_NONE;
 
     if (!(state & FLAG_DATA_SUBSCRIBE))
     {
-        result = ble.gattClient().write(GattClient::GATT_OP_WRITE_CMD,
-                                  connectionHandle,
-                                  dataSource.getValueHandle() + 1, /* HACK Alert. We're assuming that CCCD descriptor immediately follows the value attribute. */
-                                  sizeof(uint16_t),                          /* HACK Alert! size should be made into a BLE_API constant. */
-                                  reinterpret_cast<const uint8_t *>(&value));
+        result = BLE::Instance().gattClient().write(GattClient::GATT_OP_WRITE_CMD,
+                                                    connectionHandle,
+                                                    dataSource.getValueHandle() + 1, /* HACK Alert. We're assuming that CCCD descriptor immediately follows the value attribute. */
+                                                    sizeof(uint16_t),                          /* HACK Alert! size should be made into a BLE_API constant. */
+                                                    reinterpret_cast<const uint8_t *>(&value));
 
         if (result == BLE_ERROR_NONE)
         {
@@ -308,11 +327,11 @@ void ANCSClient::subscribe()
 
     if (!(state & FLAG_NOTIFICATION_SUBSCRIBE))
     {
-        result = ble.gattClient().write(GattClient::GATT_OP_WRITE_CMD,
-                                  connectionHandle,
-                                  notificationSource.getValueHandle() + 1, /* HACK Alert. We're assuming that CCCD descriptor immediately follows the value attribute. */
-                                  sizeof(uint16_t),                          /* HACK Alert! size should be made into a BLE_API constant. */
-                                  reinterpret_cast<const uint8_t *>(&value));
+        result = BLE::Instance().gattClient().write(GattClient::GATT_OP_WRITE_CMD,
+                                                    connectionHandle,
+                                                    notificationSource.getValueHandle() + 1, /* HACK Alert. We're assuming that CCCD descriptor immediately follows the value attribute. */
+                                                    sizeof(uint16_t),                          /* HACK Alert! size should be made into a BLE_API constant. */
+                                                    reinterpret_cast<const uint8_t *>(&value));
 
         if (result == BLE_ERROR_NONE)
         {
@@ -332,38 +351,40 @@ void ANCSClient::dataSent(unsigned count)
     }
 }
 
+void ANCSClient::discoveryTerminationCallback(Gap::Handle_t handle)
+{
+    if (handle == connectionHandle)
+    {
+        DEBUGOUT("terminated\r\n");
+    }
+}
+
 /*****************************************************************************/
 /* Security                                                                  */
 /*****************************************************************************/
 
-void ANCSClient::securityInitiated(Gap::Handle_t, bool, bool, SecurityManager::SecurityIOCapabilities_t)
-{
-    printf("Security started\r\n");
-}
-
-void ANCSClient::securityCompleted(Gap::Handle_t, SecurityManager::SecurityCompletionStatus_t)
-{
-    printf("Security completed\r\n");
-}
-
-void ANCSClient::linkSecured(Gap::Handle_t, SecurityManager::SecurityMode_t)
+void ANCSClient::linkSecured(Gap::Handle_t, SecurityManager::SecurityMode_t mode)
 {
     state |= FLAG_ENCRYPTION;
 
-    printf("Link secured: %02X\r\n", state);
+    DEBUGOUT("Link secured: %02X\r\n", mode);
 
-    if (state == (FLAG_NOTIFICATION | FLAG_CONTROL | FLAG_DATA | FLAG_ENCRYPTION))
+    // ancs requires a secured connection
+    if (mode >= SecurityManager::SECURITY_MODE_ENCRYPTION_NO_MITM)
     {
-        subscribe();
+        // find ANCS service
+        const uint8_t ancs_array[] = {
+            // 7905F431-B5CE-4E99-A40F-4B1E122D00D0
+            0x79, 0x05, 0xF4, 0x31, 0xB5, 0xCE, 0x4E, 0x99,
+            0xA4, 0x0F, 0x4B, 0x1E, 0x12, 0x2D, 0x00, 0xD0
+        };
+
+        const UUID ancs_uuid(ancs_array);
+
+        BLE::Instance().gattClient()
+                       .launchServiceDiscovery(connectionHandle,
+                                               NULL,
+                                               bridgeCharacteristicDiscoveryCallback,
+                                               ancs_uuid);
     }
-}
-
-void ANCSClient::contextStored(Gap::Handle_t)
-{
-    printf("Context stored\r\n");
-}
-
-void ANCSClient::passkeyDisplay(Gap::Handle_t, const SecurityManager::Passkey_t)
-{
-    printf("Display passkey\r\n");
 }

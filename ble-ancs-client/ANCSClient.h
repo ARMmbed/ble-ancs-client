@@ -94,18 +94,21 @@ public:
 
     ANCSClient();
 
-    void init(Gap::Handle_t connection);
+    void init();
+
+    void onConnection(const Gap::ConnectionCallbackParams_t* params);
+    void onDisconnection(const Gap::DisconnectionCallbackParams_t* params);
 
     /*
         Register callback for when notifications are received.
     */
-    void registerNotificationHandler(void (*callback)(Notification_t))
+    void registerNotificationHandlerTask(void (*callback)(Notification_t))
     {
         notificationHandler.attach(callback);
     }
 
     template <typename T>
-    void registerNotificationHandler(T* object, void (T::*member)(Notification_t))
+    void registerNotificationHandlerTask(T* object, void (T::*member)(Notification_t))
     {
         notificationHandler.attach(object, member);
     }
@@ -113,13 +116,13 @@ public:
     /*
         Register callback for when data is received.
     */
-    void registerDataHandler(void (*callback)(SharedPointer<Block>))
+    void registerDataHandlerTask(void (*callback)(SharedPointer<BlockStatic>))
     {
         dataHandler.attach(callback);
     }
 
     template <typename T>
-    void registerDataHandler(T* object, void (T::*member)(SharedPointer<Block>))
+    void registerDataHandlerTask(T* object, void (T::*member)(SharedPointer<BlockStatic>))
     {
         dataHandler.attach(object, member);
     }
@@ -129,9 +132,10 @@ public:
     */
     void getNotificationAttribute(uint32_t notificationUID, notification_attribute_id_t, uint16_t length = 0);
 
-
-
     void characteristicDiscoveryCallback(const DiscoveredCharacteristic* characteristicP);
+    void discoveryTerminationCallback(Gap::Handle_t);
+    void hvxCallback(const GattHVXCallbackParams* params);
+    void linkSecured(Gap::Handle_t, SecurityManager::SecurityMode_t);
 
 private:
 
@@ -144,16 +148,8 @@ private:
         FLAG_DATA_SUBSCRIBE         = 0x20
     } flags_t;
 
-    void whenDisconnected(const Gap::DisconnectionCallbackParams_t* params);
     void subscribe();
-    void hvxCallback(const GattHVXCallbackParams* params);
     void dataSent(unsigned count);
-
-    void securityInitiated(Gap::Handle_t, bool, bool, SecurityManager::SecurityIOCapabilities_t);
-    void securityCompleted(Gap::Handle_t, SecurityManager::SecurityCompletionStatus_t);
-    void linkSecured(Gap::Handle_t, SecurityManager::SecurityMode_t);
-    void contextStored(Gap::Handle_t);
-    void passkeyDisplay(Gap::Handle_t, const SecurityManager::Passkey_t);
 
 private:
     uint8_t state;
@@ -167,8 +163,9 @@ private:
     FunctionPointer1<void, Notification_t> notificationHandler;
 
     // variables for assembling data fragments
+    uint16_t expectedLength;
     uint16_t dataLength;
     uint16_t dataOffset;
-    SharedPointer<Block> dataPayload;
-    FunctionPointer1<void, SharedPointer<Block> > dataHandler;
+    SharedPointer<BlockStatic> dataPayload;
+    FunctionPointer1<void, SharedPointer<BlockStatic> > dataHandler;
 };
