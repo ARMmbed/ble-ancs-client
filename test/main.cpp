@@ -45,10 +45,12 @@
 
 const uint8_t txPowerLevel = CFG_BLE_TX_POWER_LEVEL;
 
+/*
 const uint8_t ancsArray[] = { 0xD0, 0x00, 0x2D, 0x12, 0x1E, 0x4B, 0x0F, 0xA4,
-                               0x99, 0x4E, 0xCE, 0xB5, 0x31, 0xF4, 0x05, 0x79 };
+                              0x99, 0x4E, 0xCE, 0xB5, 0x31, 0xF4, 0x05, 0x79 };
+*/
 
-const UUID ancsUUID(ancsArray);
+const UUID ancsUUID("7905F431-B5CE-4E99-A40F-4B1E122D00D0");
 
 std::string deviceNameString;
 
@@ -104,6 +106,8 @@ void button2ISR()
 void bridgeServiceDiscoveryCallback(const DiscoveredService*)
 {
     DEBUGOUT("main: found service\r\n");
+
+    ANCSManager::onConnection(connectionHandle);
 }
 
 /*
@@ -127,7 +131,6 @@ void onConnection(const Gap::ConnectionCallbackParams_t* params)
     if (params->role == Gap::PERIPHERAL)
     {
         connectionHandle = params->handle;
-//        ANCSManager::onConnection(params);
 
         BLE::Instance().gattClient()
                        .launchServiceDiscovery(connectionHandle,
@@ -145,8 +148,6 @@ void onDisconnection(const Gap::DisconnectionCallbackParams_t* params)
     if (params->handle == connectionHandle)
     {
         connectionHandle = 0;
-
-        ANCSManager::onDisconnection(params);
     }
 
     DEBUGOUT("main: Restarting the advertising process\r\n");
@@ -157,6 +158,15 @@ void onDisconnection(const Gap::DisconnectionCallbackParams_t* params)
 /*****************************************************************************/
 /* main                                                                      */
 /*****************************************************************************/
+
+void received(SharedPointer<BlockStatic> block)
+{
+    for (size_t idx = 0; idx < block->getLength(); idx++)
+    {
+        DEBUGOUT("%02X", block->at(idx));
+    }
+    DEBUGOUT("\r\n");
+}
 
 void updateAdvertisement()
 {
@@ -186,6 +196,7 @@ static void bleInitDone(BLE::InitializationCompleteCallbackContext* context)
     (void) context;
 
     ANCSManager::init();
+    ANCSManager::onReceive(received);
 
     deviceNameString = DEVICE_NAME;
 
@@ -202,6 +213,14 @@ static void bleInitDone(BLE::InitializationCompleteCallbackContext* context)
     /*************************************************************************/
 
     DEBUGOUT("ANCS Client: %s %s\r\n", __DATE__, __TIME__);
+
+    const uint8_t* buffer = ancsUUID.getBaseUUID();
+
+    for (size_t idx = 0; idx < 16; idx++)
+    {
+        DEBUGOUT("%02X", buffer[idx]);
+    }
+    DEBUGOUT("\r\n");
 }
 
 void app_start(int, char *[])

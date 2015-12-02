@@ -14,18 +14,12 @@
  * limitations under the License.
  */
 
-#include "mbed-drivers/mbed.h"
-#include "BLE/ble.h"
-
-#include "cborg/Cbore.h"
-#include "core-util/SharedPointer.h"
-
 #include "ble-ancs-client/ANCSManager.h"
+
 #include "ble-ancs-client/ANCSClient.h"
+#include "cborg/Cbore.h"
 
 #include <string>
-
-using namespace mbed::util;
 
 // control debug output
 #if 1
@@ -40,6 +34,8 @@ using namespace mbed::util;
 
 static ANCSClient ancs;
 
+static FunctionPointer1<void, SharedPointer<BlockStatic> > receiveHandler;
+
 static SharedPointer<BlockStatic> sendBlock;
 static SharedPointer<BlockStatic> titleBlock;
 
@@ -48,7 +44,6 @@ static uint32_t notificationID = 0;
 
 static void onNotificationTask(ANCSClient::Notification_t event);
 static void onNotificationAttributeTask(SharedPointer<BlockStatic> dataPayload);
-static void sendTaskDone();
 
 /*****************************************************************************/
 /* ANCS                                                                      */
@@ -62,14 +57,14 @@ void ANCSManager::init()
     ancs.registerDataHandlerTask(onNotificationAttributeTask);
 }
 
-void ANCSManager::onConnection(const Gap::ConnectionCallbackParams_t* params)
+void ANCSManager::onConnection(Gap::Handle_t handle)
 {
-    ancs.onConnection(params);
+    ancs.onConnection(handle);
 }
 
-void ANCSManager::onDisconnection(const Gap::DisconnectionCallbackParams_t* params)
+void ANCSManager::onReceive(FunctionPointer1<void, SharedPointer<BlockStatic> > callback)
 {
-    ancs.onDisconnection(params);
+    receiveHandler = callback;
 }
 
 static void onNotificationTask(ANCSClient::Notification_t event)
@@ -125,8 +120,11 @@ static void onNotificationAttributeTask(SharedPointer<BlockStatic> dataPayload)
         // set length
         sendBlock->setLength(cbor.getLength());
 
-        //
-//        minar::Scheduler::postCallback();
+        // pass block to callback handler, if set
+        if (receiveHandler)
+        {
+            minar::Scheduler::postCallback(receiveHandler.bind(sendBlock));
+        }
 
         // flag buffers as done
         titleBlock = SharedPointer<BlockStatic>();

@@ -96,7 +96,7 @@ public:
 
     void init();
 
-    void onConnection(const Gap::ConnectionCallbackParams_t* params);
+    void onConnection(Gap::Handle_t handle);
     void onDisconnection(const Gap::DisconnectionCallbackParams_t* params);
 
     /*
@@ -148,6 +148,8 @@ private:
         FLAG_DATA_SUBSCRIBE         = 0x20
     } flags_t;
 
+    void secureConnection();
+    void startDiscovery();
     void subscribe();
     void dataSent(unsigned count);
 
@@ -156,6 +158,7 @@ private:
 
     Gap::Handle_t connectionHandle;
 
+    bool doDiscovery;
     DiscoveredCharacteristic notificationSource;
     DiscoveredCharacteristic controlPoint;
     DiscoveredCharacteristic dataSource;

@@ -14,13 +14,32 @@
  * limitations under the License.
  */
 
+#ifndef __ANCS_MANAGER_H__
+#define __ANCS_MANAGER_H__
 
+#include "mbed-drivers/mbed.h"
+
+#include "core-util/SharedPointer.h"
+#include "mbed-block/BlockStatic.h"
 
 #include "ble/BLE.h"
+
+using namespace mbed::util;
 
 namespace ANCSManager
 {
     void init();
-    void onConnection(const Gap::ConnectionCallbackParams_t* params);
-    void onDisconnection(const Gap::DisconnectionCallbackParams_t* params);
+    void onConnection(Gap::Handle_t handle);
+
+    void onReceive(FunctionPointer1<void, SharedPointer<BlockStatic> > callback);
+
+    template <typename T>
+    void onReceive(T* object, void (T::*member)(SharedPointer<BlockStatic>))
+    {
+        FunctionPointer1<void, SharedPointer<BlockStatic> > fp(object, member);
+
+        onReceive(fp);
+    }
 }
+
+#endif // __ANCS_MANAGER_H__
