@@ -1,6 +1,6 @@
 {
   "name": "ble-ancs-client",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "description": "ANCS client using mbed BLE API.",
   "keywords": [],
   "author": "Marcus Chang <marcus.chang@arm.com>",
