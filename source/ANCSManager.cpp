@@ -16,13 +16,10 @@
 
 #include "ble-ancs-client/ANCSManager.h"
 
-#include "ble-ancs-client/ANCSClient.h"
-#include "cborg/Cbore.h"
-
 #include <string>
 
 // control debug output
-#if 1
+#if 0
 #include <stdio.h>
 #define DEBUGOUT(...) { printf(__VA_ARGS__); }
 #else
@@ -42,6 +39,12 @@ static SharedPointer<BlockStatic> titleBlock;
 static ANCSClient::notification_attribute_id_t attributeIndex;
 static uint32_t notificationID = 0;
 
+static Gap::Handle_t connectionHandle;
+static bool discoverANCS = false;
+
+static void onConnection(const Gap::ConnectionCallbackParams_t* params);
+static void onDiscoveryTermination(Gap::Handle_t handle);
+static void ancsServiceCallback(const DiscoveredService* service);
 static void onNotificationTask(ANCSClient::Notification_t event);
 static void onNotificationAttributeTask(SharedPointer<BlockStatic> dataPayload);
 
@@ -51,20 +54,76 @@ static void onNotificationAttributeTask(SharedPointer<BlockStatic> dataPayload);
 
 void ANCSManager::init()
 {
+    BLE& ble = BLE::Instance();
+
+    ble.gap().onConnection(onConnection);
+
+    ble.gattClient()
+       .onServiceDiscoveryTermination(onDiscoveryTermination);
+
     ancs.init();
 
     ancs.registerNotificationHandlerTask(onNotificationTask);
     ancs.registerDataHandlerTask(onNotificationAttributeTask);
 }
 
-void ANCSManager::onConnection(Gap::Handle_t handle)
-{
-    ancs.onConnection(handle);
-}
-
 void ANCSManager::onReceive(FunctionPointer1<void, SharedPointer<BlockStatic> > callback)
 {
     receiveHandler = callback;
+}
+
+static void onConnection(const Gap::ConnectionCallbackParams_t* params)
+{
+    // connected as peripheral to a central
+    if (params->role == Gap::PERIPHERAL)
+    {
+        connectionHandle = params->handle;
+
+        BLE& ble = BLE::Instance();
+
+        if (ble.gattClient().isServiceDiscoveryActive() == false)
+        {
+            ble.gattClient()
+               .launchServiceDiscovery(connectionHandle,
+                                       ancsServiceCallback,
+                                       NULL,
+                                       ANCS::UUID);
+        }
+        else
+        {
+            discoverANCS = true;
+        }
+    }
+}
+
+static void ancsServiceCallback(const DiscoveredService*)
+{
+    DEBUGOUT("ancs: found service\r\n");
+
+    discoverANCS = false;
+    BLE::Instance().gattClient().terminateServiceDiscovery();
+
+    ancs.onConnection(connectionHandle);
+}
+
+static void onDiscoveryTermination(Gap::Handle_t handle)
+{
+    if (handle == connectionHandle)
+    {
+        DEBUGOUT("ancs: discovery done\r\n");
+
+        BLE& ble = BLE::Instance();
+
+        if ((ble.gattClient().isServiceDiscoveryActive() == false)
+            && (discoverANCS))
+        {
+            ble.gattClient()
+               .launchServiceDiscovery(connectionHandle,
+                                       ancsServiceCallback,
+                                       NULL,
+                                       ANCS::UUID);
+        }
+    }
 }
 
 static void onNotificationTask(ANCSClient::Notification_t event)
@@ -73,7 +132,7 @@ static void onNotificationTask(ANCSClient::Notification_t event)
     if ((event.eventID == ANCSClient::EventIDNotificationAdded) &&
         !(event.eventFlags & ANCSClient::EventFlagSilent))
     {
-        DEBUGOUT("main: %u %u %u %u %lu\r\n", event.eventID, event.eventFlags, event.categoryID, event.categoryCount, event.notificationUID);
+        DEBUGOUT("ancs: %u %u %u %u %lu\r\n", event.eventID, event.eventFlags, event.categoryID, event.categoryCount, event.notificationUID);
 
         notificationID = event.notificationUID;
 

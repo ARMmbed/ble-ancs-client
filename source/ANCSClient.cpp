@@ -19,7 +19,7 @@
 #include "mbed-drivers/mbed.h"
 
 // control debug output
-#if 1
+#if 0
 #include <stdio.h>
 #define DEBUGOUT(...) { printf(__VA_ARGS__); }
 #else
@@ -103,6 +103,9 @@ void ANCSClient::init()
     ble.gattClient().onHVX(bridgeHvxCallback);
     ble.gattServer().onDataSent(this, &ANCSClient::dataSent);
 
+    ble.gattClient()
+       .onServiceDiscoveryTermination(bridgeDiscoveryTerminationCallback);
+
     // security
     ble.securityManager().init();
     ble.securityManager().onLinkSecured(bridgeLinkSecured);
@@ -164,7 +167,7 @@ void ANCSClient::onDisconnection(const Gap::DisconnectionCallbackParams_t* param
 {
     if (params->handle == connectionHandle)
     {
-        DEBUGOUT("disconnected: reset\r\n");
+        DEBUGOUT("ancs: disconnected: reset\r\n");
 
         connectionHandle = 0;
         doDiscovery = false;
@@ -180,12 +183,12 @@ void ANCSClient::secureConnection()
     SecurityManager::LinkSecurityStatus_t securityStatus = SecurityManager::NOT_ENCRYPTED;
     ble.securityManager().getLinkSecurity(connectionHandle, &securityStatus);
 
+    // do discovery when connection is encrypted
+    doDiscovery = true;
+
     // authenticate if link is not encrypted
     if (securityStatus == SecurityManager::NOT_ENCRYPTED)
     {
-        // do discovery when connection is encrypted
-        doDiscovery = true;
-
         m_sec_params.bond         = SEC_PARAM_BOND;
         m_sec_params.mitm         = SEC_PARAM_MITM;
         m_sec_params.io_caps      = SEC_PARAM_IO_CAPABILITIES;
@@ -199,7 +202,8 @@ void ANCSClient::secureConnection()
     {
         DEBUGOUT("ancs: link already encrypted\r\n");
 
-        startDiscovery();
+        minar::Scheduler::postCallback(this, &ANCSClient::startDiscovery)
+            .delay(minar::milliseconds(1000));
     }
 }
 
@@ -211,7 +215,8 @@ void ANCSClient::linkSecured(Gap::Handle_t, SecurityManager::SecurityMode_t mode
 
     if (doDiscovery)
     {
-        minar::Scheduler::postCallback(this, &ANCSClient::startDiscovery);
+        minar::Scheduler::postCallback(this, &ANCSClient::startDiscovery)
+            .delay(minar::milliseconds(1000));
     }
 }
 void ANCSClient::startDiscovery()
@@ -220,25 +225,16 @@ void ANCSClient::startDiscovery()
 
     BLE& ble = BLE::Instance();
 
-    // debug
-    ble.gattClient()
-       .onServiceDiscoveryTermination(bridgeDiscoveryTerminationCallback);
+    if (ble.gattClient().isServiceDiscoveryActive() == false)
+    {
+        ble.gattClient()
+           .launchServiceDiscovery(connectionHandle,
+                                   NULL,
+                                   bridgeCharacteristicDiscoveryCallback,
+                                   ANCS::UUID);
 
-    // find ANCS service
-    const uint8_t ancsArray[] = {
-        0xD0, 0x00, 0x2D, 0x12, 0x1E, 0x4B, 0x0F, 0xA4,
-        0x99, 0x4E, 0xCE, 0xB5, 0x31, 0xF4, 0x05, 0x79
-    };
-
-    const UUID ancsUUID(ancsArray);
-
-    ble.gattClient()
-       .launchServiceDiscovery(connectionHandle,
-                               NULL,
-                               bridgeCharacteristicDiscoveryCallback,
-                               ancsUUID);
+    }
 }
-
 
 void ANCSClient::characteristicDiscoveryCallback(const DiscoveredCharacteristic* characteristicP)
 {
@@ -276,6 +272,7 @@ void ANCSClient::characteristicDiscoveryCallback(const DiscoveredCharacteristic*
         DEBUGOUT("ancs: subscribe\r\n");
 
         doDiscovery = false;
+        BLE::Instance().gattClient().terminateServiceDiscovery();
 
         subscribe();
     }
@@ -328,6 +325,12 @@ void ANCSClient::discoveryTerminationCallback(Gap::Handle_t handle)
     if (handle == connectionHandle)
     {
         DEBUGOUT("ancs: discovery done\r\n");
+
+        if (doDiscovery)
+        {
+            minar::Scheduler::postCallback(this, &ANCSClient::startDiscovery)
+                .delay(minar::milliseconds(1000));
+        }
     }
 }
 

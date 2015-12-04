@@ -19,17 +19,17 @@
 
 #include "mbed-drivers/mbed.h"
 
+#include "ble-ancs-client/ANCSClient.h"
+#include "cborg/Cbor.h"
+
 #include "core-util/SharedPointer.h"
 #include "mbed-block/BlockStatic.h"
-
-#include "ble/BLE.h"
 
 using namespace mbed::util;
 
 namespace ANCSManager
 {
     void init();
-    void onConnection(Gap::Handle_t handle);
 
     void onReceive(FunctionPointer1<void, SharedPointer<BlockStatic> > callback);
 

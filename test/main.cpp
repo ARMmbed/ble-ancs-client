@@ -45,13 +45,6 @@
 
 const uint8_t txPowerLevel = CFG_BLE_TX_POWER_LEVEL;
 
-/*
-const uint8_t ancsArray[] = { 0xD0, 0x00, 0x2D, 0x12, 0x1E, 0x4B, 0x0F, 0xA4,
-                              0x99, 0x4E, 0xCE, 0xB5, 0x31, 0xF4, 0x05, 0x79 };
-*/
-
-const UUID ancsUUID("7905F431-B5CE-4E99-A40F-4B1E122D00D0");
-
 std::string deviceNameString;
 
 /*****************************************************************************/
@@ -103,13 +96,6 @@ void button2ISR()
 /* BLE                                                                       */
 /*****************************************************************************/
 
-void bridgeServiceDiscoveryCallback(const DiscoveredService*)
-{
-    DEBUGOUT("main: found service\r\n");
-
-    ANCSManager::onConnection(connectionHandle);
-}
-
 /*
     Functions called when BLE device connects and disconnects.
 */
@@ -126,30 +112,11 @@ void onConnection(const Gap::ConnectionCallbackParams_t* params)
         params->peerAddr[3],
         params->peerAddr[4],
         params->peerAddr[5]);
-
-    // connected as peripheral to a central
-    if (params->role == Gap::PERIPHERAL)
-    {
-        connectionHandle = params->handle;
-
-        BLE::Instance().gattClient()
-                       .launchServiceDiscovery(connectionHandle,
-                                               bridgeServiceDiscoveryCallback,
-                                               NULL,
-                                               ancsUUID);
-    }
 }
 
 void onDisconnection(const Gap::DisconnectionCallbackParams_t* params)
 {
     DEBUGOUT("main: Disconnected!\r\n");
-
-    // disconnected from central
-    if (params->handle == connectionHandle)
-    {
-        connectionHandle = 0;
-    }
-
     DEBUGOUT("main: Restarting the advertising process\r\n");
 
     ble.gap().startAdvertising();
@@ -176,7 +143,7 @@ void updateAdvertisement()
 
     ble.gap().clearAdvertisingPayload();
     ble.gap().accumulateAdvertisingPayload(GapAdvertisingData::BREDR_NOT_SUPPORTED|GapAdvertisingData::LE_GENERAL_DISCOVERABLE);
-    ble.gap().accumulateAdvertisingPayload(GapAdvertisingData::LIST_128BIT_SOLICITATION_IDS, ancsUUID.getBaseUUID(), ancsUUID.getLen());
+    ble.gap().accumulateAdvertisingPayload(GapAdvertisingData::LIST_128BIT_SOLICITATION_IDS, ANCS::UUID.getBaseUUID(), ANCS::UUID.getLen());
 
     /*************************************************************************/
 
@@ -213,14 +180,6 @@ static void bleInitDone(BLE::InitializationCompleteCallbackContext* context)
     /*************************************************************************/
 
     DEBUGOUT("ANCS Client: %s %s\r\n", __DATE__, __TIME__);
-
-    const uint8_t* buffer = ancsUUID.getBaseUUID();
-
-    for (size_t idx = 0; idx < 16; idx++)
-    {
-        DEBUGOUT("%02X", buffer[idx]);
-    }
-    DEBUGOUT("\r\n");
 }
 
 void app_start(int, char *[])

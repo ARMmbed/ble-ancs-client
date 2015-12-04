@@ -14,9 +14,7 @@
  * limitations under the License.
  */
 
-#include "BLE/ble.h"
-
-
+#include "ble/BLE.h"
 #include "ble/DiscoveredCharacteristic.h"
 
 #include "core-util/FunctionPointer.h"
@@ -25,6 +23,11 @@
 #include "mbed-block/BlockDynamic.h"
 
 using namespace mbed::util;
+
+namespace ANCS
+{
+    const UUID UUID("7905F431-B5CE-4E99-A40F-4B1E122D00D0");
+}
 
 class ANCSClient
 {
