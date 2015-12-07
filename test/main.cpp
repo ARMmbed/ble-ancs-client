@@ -18,7 +18,7 @@
 #include "mbed-drivers/mbed.h"
 #include "ble/BLE.h"
 
-#include "ble-ancs-client/ANCSManager.h"
+#include "ble-ancs-client/ANCSClient.h"
 
 #include <string>
 
@@ -43,53 +43,77 @@
 
 #define VERBOSE_DEBUG_OUT 0
 
-const uint8_t txPowerLevel = CFG_BLE_TX_POWER_LEVEL;
-
-std::string deviceNameString;
+#define MAX_RETRIEVE_LENGTH 110
 
 /*****************************************************************************/
 /* Variables used by the app                                                 */
 /*****************************************************************************/
 
-static BLE ble;
+const uint8_t txPowerLevel = CFG_BLE_TX_POWER_LEVEL;
 
-static Gap::Handle_t connectionHandle;
+std::string deviceNameString;
+
+BLE ble;
+Gap::Handle_t connectionHandle;
+
+ANCSClient ancs;
+ANCSClient::notification_attribute_id_t attributeIndex;
+uint32_t notificationID = 0;
 
 /*****************************************************************************/
 /* Debug                                                                     */
 /*****************************************************************************/
 
 // debug led - blinks to show liveness
-static Ticker ticker;
-static DigitalOut mbed_led1(LED1);
-
-// enable buttons to initiate transfer
-static InterruptIn button1(BUTTON1);
-static InterruptIn button2(BUTTON2);
+Ticker ticker;
+DigitalOut mbed_led1(LED1);
 
 void periodicCallbackISR(void)
 {
     mbed_led1 = !mbed_led1;
 }
 
-void button1Task()
-{
+/*****************************************************************************/
+/* ANCS                                                                      */
+/*****************************************************************************/
 
+void onNotificationTask(ANCSClient::Notification_t event)
+{
+    // only process newly added notifications that are not silent
+    if ((event.eventID == ANCSClient::EventIDNotificationAdded) &&
+        !(event.eventFlags & ANCSClient::EventFlagSilent))
+    {
+        DEBUGOUT("ancs: %u %u %u %u %lu\r\n", event.eventID, event.eventFlags, event.categoryID, event.categoryCount, event.notificationUID);
+
+        notificationID = event.notificationUID;
+
+        // get title
+        attributeIndex = ANCSClient::NotificationAttributeIDTitle;
+        ancs.getNotificationAttribute(notificationID, attributeIndex, MAX_RETRIEVE_LENGTH);
+    }
 }
 
-void button2Task()
+void onNotificationAttributeTask(SharedPointer<BlockStatic> dataPayload)
 {
+    DEBUGOUT("data: ");
+    for (uint8_t idx = 0; idx < dataPayload->getLength(); idx++)
+    {
+        DEBUGOUT("%c", dataPayload->at(idx));
+    }
+    DEBUGOUT("\r\n");
 
-}
-
-void button1ISR()
-{
-    minar::Scheduler::postCallback(button1Task);
-}
-
-void button2ISR()
-{
-    minar::Scheduler::postCallback(button2Task);
+    if (attributeIndex == ANCSClient::NotificationAttributeIDTitle)
+    {
+        // get subtitle
+        attributeIndex = ANCSClient::NotificationAttributeIDSubtitle;
+        ancs.getNotificationAttribute(notificationID, attributeIndex, MAX_RETRIEVE_LENGTH);
+    }
+    else if (attributeIndex == ANCSClient::NotificationAttributeIDSubtitle)
+    {
+        // get message
+        attributeIndex = ANCSClient::NotificationAttributeIDMessage;
+        ancs.getNotificationAttribute(notificationID, attributeIndex, MAX_RETRIEVE_LENGTH);
+    }
 }
 
 /*****************************************************************************/
@@ -122,19 +146,6 @@ void onDisconnection(const Gap::DisconnectionCallbackParams_t* params)
     ble.gap().startAdvertising();
 }
 
-/*****************************************************************************/
-/* main                                                                      */
-/*****************************************************************************/
-
-void received(SharedPointer<BlockStatic> block)
-{
-    for (size_t idx = 0; idx < block->getLength(); idx++)
-    {
-        DEBUGOUT("%02X", block->at(idx));
-    }
-    DEBUGOUT("\r\n");
-}
-
 void updateAdvertisement()
 {
     ble.gap().stopAdvertising();
@@ -158,12 +169,9 @@ void updateAdvertisement()
     ble.gap().startAdvertising();
 }
 
-static void bleInitDone(BLE::InitializationCompleteCallbackContext* context)
+void bleInitDone(BLE::InitializationCompleteCallbackContext* context)
 {
     (void) context;
-
-    ANCSManager::init();
-    ANCSManager::onReceive(received);
 
     deviceNameString = DEVICE_NAME;
 
@@ -179,15 +187,19 @@ static void bleInitDone(BLE::InitializationCompleteCallbackContext* context)
 
     /*************************************************************************/
 
+    ancs.init();
+    ancs.registerNotificationHandlerTask(onNotificationTask);
+    ancs.registerDataHandlerTask(onNotificationAttributeTask);
+
     DEBUGOUT("ANCS Client: %s %s\r\n", __DATE__, __TIME__);
 }
 
+/*****************************************************************************/
+/* main                                                                      */
+/*****************************************************************************/
+
 void app_start(int, char *[])
 {
-    // setup buttons
-    button1.fall(button1ISR);
-    button2.fall(button2ISR);
-
     // blink led
     ticker.attach(periodicCallbackISR, 1.0);
 

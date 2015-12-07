@@ -26,6 +26,9 @@
 #define DEBUGOUT(...) /* nothing */
 #endif // DEBUGOUT
 
+#define MAX_DISCOVERY_RETRY 3
+#define RETRY_DELAY_MS 1000
+
 /*****************************************************************************/
 /* NRF51                                                                     */
 /*****************************************************************************/
@@ -48,6 +51,14 @@ static ble_gap_sec_params_t             m_sec_params;
 /*****************************************************************************/
 
 static ANCSClient* ancsBridge = NULL;
+
+static void bridgeServiceDiscoveryCallback(const DiscoveredService* service)
+{
+    if (ancsBridge)
+    {
+        ancsBridge->serviceDiscoveryCallback(service);
+    }
+}
 
 static void bridgeCharacteristicDiscoveryCallback(const DiscoveredCharacteristic* characteristicP)
 {
@@ -86,7 +97,8 @@ static void bridgeLinkSecured(Gap::Handle_t handle, SecurityManager::SecurityMod
 ANCSClient::ANCSClient()
     :   state(0),
         connectionHandle(0),
-        doDiscovery(false),
+        findService(0),
+        findCharacteristics(0),
         expectedLength(0),
         dataLength(0)
 {
@@ -99,6 +111,7 @@ void ANCSClient::init()
     BLE& ble = BLE::Instance();
 
     // register callbacks
+    ble.gap().onConnection(this, &ANCSClient::onConnection);
     ble.gap().onDisconnection(this, &ANCSClient::onDisconnection);
     ble.gattClient().onHVX(bridgeHvxCallback);
     ble.gattServer().onDataSent(this, &ANCSClient::dataSent);
@@ -153,26 +166,45 @@ void ANCSClient::getNotificationAttribute(uint32_t notificationUID,
 /* BLE maintainance                                                          */
 /*****************************************************************************/
 
-void ANCSClient::onConnection(Gap::Handle_t handle)
+void ANCSClient::onConnection(const Gap::ConnectionCallbackParams_t* params)
 {
-    DEBUGOUT("ancs: on connection\r\n");
+    // connected as peripheral to a central
+    if (params->role == Gap::PERIPHERAL)
+    {
+        connectionHandle = params->handle;
 
-    // store connection handle
-    connectionHandle = handle;
-
-    minar::Scheduler::postCallback(this, &ANCSClient::secureConnection);
+        minar::Scheduler::postCallback(this, &ANCSClient::startServiceDiscovery);
+    }
 }
 
-void ANCSClient::onDisconnection(const Gap::DisconnectionCallbackParams_t* params)
+void ANCSClient::startServiceDiscovery()
 {
-    if (params->handle == connectionHandle)
-    {
-        DEBUGOUT("ancs: disconnected: reset\r\n");
+    DEBUGOUT("ancs: service discovery begin\r\n");
 
-        connectionHandle = 0;
-        doDiscovery = false;
-        state = 0;
+    BLE& ble = BLE::Instance();
+
+    if (ble.gattClient().isServiceDiscoveryActive() == false)
+    {
+        ble.gattClient()
+           .launchServiceDiscovery(connectionHandle,
+                                   bridgeServiceDiscoveryCallback,
+                                   NULL,
+                                   ANCS::UUID);
     }
+    else
+    {
+        findService = MAX_DISCOVERY_RETRY;
+    }
+}
+
+void ANCSClient::serviceDiscoveryCallback(const DiscoveredService*)
+{
+    DEBUGOUT("ancs: found service\r\n");
+
+    findService = 0;
+    BLE::Instance().gattClient().terminateServiceDiscovery();
+
+    minar::Scheduler::postCallback(this, &ANCSClient::secureConnection);
 }
 
 void ANCSClient::secureConnection()
@@ -184,7 +216,7 @@ void ANCSClient::secureConnection()
     ble.securityManager().getLinkSecurity(connectionHandle, &securityStatus);
 
     // do discovery when connection is encrypted
-    doDiscovery = true;
+    findCharacteristics = MAX_DISCOVERY_RETRY;
 
     // authenticate if link is not encrypted
     if (securityStatus == SecurityManager::NOT_ENCRYPTED)
@@ -202,8 +234,7 @@ void ANCSClient::secureConnection()
     {
         DEBUGOUT("ancs: link already encrypted\r\n");
 
-        minar::Scheduler::postCallback(this, &ANCSClient::startDiscovery)
-            .delay(minar::milliseconds(1000));
+        minar::Scheduler::postCallback(this, &ANCSClient::startCharacteristicDiscovery);
     }
 }
 
@@ -213,15 +244,15 @@ void ANCSClient::linkSecured(Gap::Handle_t, SecurityManager::SecurityMode_t mode
 
     DEBUGOUT("ancs: link secured: %02X\r\n", mode);
 
-    if (doDiscovery)
+    if (findCharacteristics)
     {
-        minar::Scheduler::postCallback(this, &ANCSClient::startDiscovery)
-            .delay(minar::milliseconds(1000));
+        minar::Scheduler::postCallback(this, &ANCSClient::startCharacteristicDiscovery);
     }
 }
-void ANCSClient::startDiscovery()
+
+void ANCSClient::startCharacteristicDiscovery()
 {
-    DEBUGOUT("ancs: discovery begin\r\n");
+    DEBUGOUT("ancs: characteristic discovery begin\r\n");
 
     BLE& ble = BLE::Instance();
 
@@ -232,7 +263,10 @@ void ANCSClient::startDiscovery()
                                    NULL,
                                    bridgeCharacteristicDiscoveryCallback,
                                    ANCS::UUID);
-
+    }
+    else
+    {
+        findCharacteristics = MAX_DISCOVERY_RETRY;
     }
 }
 
@@ -271,10 +305,10 @@ void ANCSClient::characteristicDiscoveryCallback(const DiscoveredCharacteristic*
     {
         DEBUGOUT("ancs: subscribe\r\n");
 
-        doDiscovery = false;
+        findCharacteristics = 0;
         BLE::Instance().gattClient().terminateServiceDiscovery();
 
-        subscribe();
+        minar::Scheduler::postCallback(this, &ANCSClient::subscribe);
     }
 }
 
@@ -326,11 +360,35 @@ void ANCSClient::discoveryTerminationCallback(Gap::Handle_t handle)
     {
         DEBUGOUT("ancs: discovery done\r\n");
 
-        if (doDiscovery)
+        if (findService)
         {
-            minar::Scheduler::postCallback(this, &ANCSClient::startDiscovery)
-                .delay(minar::milliseconds(1000));
+            // decrement retry counter and post callback
+            findService--;
+
+            minar::Scheduler::postCallback(this, &ANCSClient::startServiceDiscovery)
+                .delay(minar::milliseconds(RETRY_DELAY_MS));
         }
+        else if (findCharacteristics)
+        {
+            // decrement retry counter and post callback
+            findCharacteristics--;
+
+            minar::Scheduler::postCallback(this, &ANCSClient::startCharacteristicDiscovery)
+                .delay(minar::milliseconds(RETRY_DELAY_MS));
+        }
+    }
+}
+
+void ANCSClient::onDisconnection(const Gap::DisconnectionCallbackParams_t* params)
+{
+    if (params->handle == connectionHandle)
+    {
+        DEBUGOUT("ancs: disconnected: reset\r\n");
+
+        connectionHandle = 0;
+        findService = 0;
+        findCharacteristics = 0;
+        state = 0;
     }
 }
 

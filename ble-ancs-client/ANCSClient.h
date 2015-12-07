@@ -99,7 +99,7 @@ public:
 
     void init();
 
-    void onConnection(Gap::Handle_t handle);
+    void onConnection(const Gap::ConnectionCallbackParams_t* params);
     void onDisconnection(const Gap::DisconnectionCallbackParams_t* params);
 
     /*
@@ -135,7 +135,8 @@ public:
     */
     void getNotificationAttribute(uint32_t notificationUID, notification_attribute_id_t, uint16_t length = 0);
 
-    void characteristicDiscoveryCallback(const DiscoveredCharacteristic* characteristicP);
+    void serviceDiscoveryCallback(const DiscoveredService*);
+    void characteristicDiscoveryCallback(const DiscoveredCharacteristic*);
     void discoveryTerminationCallback(Gap::Handle_t);
     void hvxCallback(const GattHVXCallbackParams* params);
     void linkSecured(Gap::Handle_t, SecurityManager::SecurityMode_t);
@@ -152,7 +153,8 @@ private:
     } flags_t;
 
     void secureConnection();
-    void startDiscovery();
+    void startServiceDiscovery();
+    void startCharacteristicDiscovery();
     void subscribe();
     void dataSent(unsigned count);
 
@@ -161,7 +163,8 @@ private:
 
     Gap::Handle_t connectionHandle;
 
-    bool doDiscovery;
+    uint8_t findService;
+    uint8_t findCharacteristics;
     DiscoveredCharacteristic notificationSource;
     DiscoveredCharacteristic controlPoint;
     DiscoveredCharacteristic dataSource;
