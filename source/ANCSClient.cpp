@@ -16,8 +16,6 @@
 
 #include "ble-ancs-client/ANCSClient.h"
 
-#include "mbed-drivers/mbed.h"
-
 // control debug output
 #if 0
 #include <stdio.h>
@@ -28,23 +26,6 @@
 
 #define MAX_DISCOVERY_RETRY 3
 #define RETRY_DELAY_MS 1000
-
-/*****************************************************************************/
-/* NRF51                                                                     */
-/*****************************************************************************/
-#include "ble_gap.h"
-
-#define SEC_PARAM_BOND                  1                                                    /**< Perform bonding. */
-#define SEC_PARAM_MITM                  0                                                    /**< Man In The Middle protection not required. */
-#define SEC_PARAM_IO_CAPABILITIES       BLE_GAP_IO_CAPS_NONE                                 /**< No I/O capabilities. */
-#define SEC_PARAM_OOB                   0                                                    /**< Out Of Band data not available. */
-#define SEC_PARAM_MIN_KEY_SIZE          7                                                    /**< Minimum encryption key size. */
-#define SEC_PARAM_MAX_KEY_SIZE          16                                                   /**< Maximum encryption key size. */
-
-static ble_gap_sec_params_t             m_sec_params;
-
-/*****************************************************************************/
-
 
 /*****************************************************************************/
 /* C to C++                                                                  */
@@ -201,9 +182,11 @@ void ANCSClient::serviceDiscoveryCallback(const DiscoveredService*)
 {
     DEBUGOUT("ancs: found service\r\n");
 
+    // terminate discovery
     findService = 0;
     BLE::Instance().gattClient().terminateServiceDiscovery();
 
+    // secure connection so we can access characteristics
     minar::Scheduler::postCallback(this, &ANCSClient::secureConnection);
 }
 
@@ -221,14 +204,7 @@ void ANCSClient::secureConnection()
     // authenticate if link is not encrypted
     if (securityStatus == SecurityManager::NOT_ENCRYPTED)
     {
-        m_sec_params.bond         = SEC_PARAM_BOND;
-        m_sec_params.mitm         = SEC_PARAM_MITM;
-        m_sec_params.io_caps      = SEC_PARAM_IO_CAPABILITIES;
-        m_sec_params.oob          = SEC_PARAM_OOB;
-        m_sec_params.min_key_size = SEC_PARAM_MIN_KEY_SIZE;
-        m_sec_params.max_key_size = SEC_PARAM_MAX_KEY_SIZE;
-
-        sd_ble_gap_authenticate(connectionHandle, &m_sec_params);
+        ble.securityManager().setLinkSecurity(connectionHandle, SecurityManager::SECURITY_MODE_ENCRYPTION_NO_MITM);
     }
     else
     {
@@ -309,6 +285,12 @@ void ANCSClient::characteristicDiscoveryCallback(const DiscoveredCharacteristic*
         BLE::Instance().gattClient().terminateServiceDiscovery();
 
         minar::Scheduler::postCallback(this, &ANCSClient::subscribe);
+
+        // signal service found
+        if (serviceFoundHandler)
+        {
+            minar::Scheduler::postCallback(serviceFoundHandler);
+        }
     }
 }
 

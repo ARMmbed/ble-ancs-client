@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#include "mbed-drivers/mbed.h"
+
 #include "ble/BLE.h"
 #include "ble/DiscoveredCharacteristic.h"
 
@@ -103,31 +105,48 @@ public:
     void onDisconnection(const Gap::DisconnectionCallbackParams_t* params);
 
     /*
+        Register callback for when the ANCS is found.
+    */
+    void registerServiceFoundHandlerTask(FunctionPointer0<void> callback)
+    {
+        serviceFoundHandler = callback;
+    }
+
+    template <typename T>
+    void registerServiceFoundHandlerTask(T* object, void (T::*member)(void))
+    {
+        FunctionPointer0<void> callback(object, member);
+        serviceFoundHandler = callback;
+    }
+
+    /*
         Register callback for when notifications are received.
     */
-    void registerNotificationHandlerTask(void (*callback)(Notification_t))
+    void registerNotificationHandlerTask(FunctionPointer1<void, Notification_t> callback)
     {
-        notificationHandler.attach(callback);
+        notificationHandler = callback;
     }
 
     template <typename T>
     void registerNotificationHandlerTask(T* object, void (T::*member)(Notification_t))
     {
-        notificationHandler.attach(object, member);
+        FunctionPointer1<void, Notification_t> callback(object, member);
+        notificationHandler = callback;
     }
 
     /*
         Register callback for when data is received.
     */
-    void registerDataHandlerTask(void (*callback)(SharedPointer<BlockStatic>))
+    void registerDataHandlerTask(FunctionPointer1<void, SharedPointer<BlockStatic> > callback)
     {
-        dataHandler.attach(callback);
+        dataHandler = callback;
     }
 
     template <typename T>
     void registerDataHandlerTask(T* object, void (T::*member)(SharedPointer<BlockStatic>))
     {
-        dataHandler.attach(object, member);
+        FunctionPointer1<void, SharedPointer<BlockStatic> > callback(object, member);
+        dataHandler = callback;
     }
 
     /*
@@ -162,6 +181,7 @@ private:
     uint8_t state;
 
     Gap::Handle_t connectionHandle;
+    FunctionPointer0<void> serviceFoundHandler;
 
     uint8_t findService;
     uint8_t findCharacteristics;

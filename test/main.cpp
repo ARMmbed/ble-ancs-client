@@ -21,6 +21,7 @@
 #include "ble-ancs-client/ANCSClient.h"
 
 #include <string>
+#include <queue>
 
 /*****************************************************************************/
 /* Configuration                                                             */
@@ -60,6 +61,8 @@ ANCSClient ancs;
 ANCSClient::notification_attribute_id_t attributeIndex;
 uint32_t notificationID = 0;
 
+std::queue<uint32_t> notificationQueue;
+
 /*****************************************************************************/
 /* Debug                                                                     */
 /*****************************************************************************/
@@ -77,6 +80,16 @@ void periodicCallbackISR(void)
 /* ANCS                                                                      */
 /*****************************************************************************/
 
+void processQueue()
+{
+    DEBUGOUT("ancs: process queue: %d\r\n", notificationQueue.size());
+
+    notificationID = notificationQueue.front();
+
+    attributeIndex = ANCSClient::NotificationAttributeIDTitle;
+    ancs.getNotificationAttribute(notificationID, attributeIndex, MAX_RETRIEVE_LENGTH);
+}
+
 void onNotificationTask(ANCSClient::Notification_t event)
 {
     // only process newly added notifications that are not silent
@@ -85,11 +98,12 @@ void onNotificationTask(ANCSClient::Notification_t event)
     {
         DEBUGOUT("ancs: %u %u %u %u %lu\r\n", event.eventID, event.eventFlags, event.categoryID, event.categoryCount, event.notificationUID);
 
-        notificationID = event.notificationUID;
+        notificationQueue.push(event.notificationUID);
 
-        // get title
-        attributeIndex = ANCSClient::NotificationAttributeIDTitle;
-        ancs.getNotificationAttribute(notificationID, attributeIndex, MAX_RETRIEVE_LENGTH);
+        if (notificationQueue.size() == 1)
+        {
+            minar::Scheduler::postCallback(processQueue);
+        }
     }
 }
 
@@ -113,6 +127,17 @@ void onNotificationAttributeTask(SharedPointer<BlockStatic> dataPayload)
         // get message
         attributeIndex = ANCSClient::NotificationAttributeIDMessage;
         ancs.getNotificationAttribute(notificationID, attributeIndex, MAX_RETRIEVE_LENGTH);
+    }
+    else if (attributeIndex == ANCSClient::NotificationAttributeIDMessage)
+    {
+        // remove ID from queue
+        notificationQueue.pop();
+
+        // process next ID if available
+        if (notificationQueue.size() > 0)
+        {
+            minar::Scheduler::postCallback(processQueue);
+        }
     }
 }
 
