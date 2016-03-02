@@ -16,12 +16,10 @@
     }
   ],
   "dependencies": {
-    "ble": "^2.0.0",
-    "mbed-block": "^1.0.0",
-    "core-util": "^1.0.0",
-    "cborg": "^3.0.0"
-  },
-  "testDependencies": {
-    "mbed-drivers": "*"
+    "mbed-drivers": "0.12.2",
+    "ble": "2.5.0",
+    "mbed-block": "1.0.2",
+    "core-util": "1.5.2",
+    "cborg": "3.0.3"
   }
 }

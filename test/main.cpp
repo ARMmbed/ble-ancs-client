@@ -204,7 +204,6 @@ void bleInitDone(BLE::InitializationCompleteCallbackContext* context)
     ble.gap().onConnection(onConnection);
     ble.gap().onDisconnection(onDisconnection);
 
-    ble.gap().setAddress(Gap::ADDR_TYPE_RANDOM_STATIC, NULL);
     ble.gap().setDeviceName((const uint8_t*) deviceNameString.c_str());
     ble.gap().setTxPower(txPowerLevel);
 
