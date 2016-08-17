@@ -92,18 +92,13 @@ void processQueue()
 
 void onNotificationTask(ANCSClient::Notification_t event)
 {
-    // only process newly added notifications that are not silent
-    if ((event.eventID == ANCSClient::EventIDNotificationAdded) &&
-        !(event.eventFlags & ANCSClient::EventFlagSilent))
+    DEBUGOUT("ancs: %u %u %u %u %lu\r\n", event.eventID, event.eventFlags, event.categoryID, event.categoryCount, event.notificationUID);
+
+    notificationQueue.push(event.notificationUID);
+
+    if (notificationQueue.size() == 1)
     {
-        DEBUGOUT("ancs: %u %u %u %u %lu\r\n", event.eventID, event.eventFlags, event.categoryID, event.categoryCount, event.notificationUID);
-
-        notificationQueue.push(event.notificationUID);
-
-        if (notificationQueue.size() == 1)
-        {
-            minar::Scheduler::postCallback(processQueue);
-        }
+        minar::Scheduler::postCallback(processQueue);
     }
 }
 
@@ -165,6 +160,8 @@ void onConnection(const Gap::ConnectionCallbackParams_t* params)
 
 void onDisconnection(const Gap::DisconnectionCallbackParams_t* params)
 {
+    (void) params;
+
     DEBUGOUT("main: Disconnected!\r\n");
     DEBUGOUT("main: Restarting the advertising process\r\n");
 

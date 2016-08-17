@@ -112,6 +112,7 @@ void ANCSClient::getNotificationAttribute(uint32_t notificationUID,
     uint8_t payload[8];
     uint8_t payloadLength;
 
+    // construct notification attribute request
     payload[0] = CommandIDGetNotificationAttributes;
     payload[1] = notificationUID;
     payload[2] = notificationUID >> 8;
@@ -133,14 +134,16 @@ void ANCSClient::getNotificationAttribute(uint32_t notificationUID,
         payloadLength = 6;
     }
 
+    // allocate space to store response
+    dataLength = 0;
+    dataPayload = SharedPointer<BlockStatic>(new BlockDynamic(length));
+
+    // send request
     BLE::Instance().gattClient().write(GattClient::GATT_OP_WRITE_REQ,
                                        connectionHandle,
                                        controlPoint.getValueHandle(),
                                        payloadLength,
                                        payload);
-
-    dataLength = 0;
-    dataPayload = SharedPointer<BlockStatic>(new BlockDynamic(length));
 }
 
 /*****************************************************************************/
@@ -216,6 +219,8 @@ void ANCSClient::secureConnection()
 
 void ANCSClient::linkSecured(Gap::Handle_t, SecurityManager::SecurityMode_t mode)
 {
+    (void) mode;
+
     state |= FLAG_ENCRYPTION;
 
     DEBUGOUT("ancs: link secured: %02X\r\n", mode);
@@ -340,8 +345,6 @@ void ANCSClient::discoveryTerminationCallback(Gap::Handle_t handle)
 {
     if (handle == connectionHandle)
     {
-        DEBUGOUT("ancs: discovery done\r\n");
-
         if (findService)
         {
             // decrement retry counter and post callback
@@ -357,6 +360,10 @@ void ANCSClient::discoveryTerminationCallback(Gap::Handle_t handle)
 
             minar::Scheduler::postCallback(this, &ANCSClient::startCharacteristicDiscovery)
                 .delay(minar::milliseconds(RETRY_DELAY_MS));
+        }
+        else
+        {
+            DEBUGOUT("ancs: discovery done\r\n");
         }
     }
 }
@@ -381,8 +388,11 @@ void ANCSClient::onDisconnection(const Gap::DisconnectionCallbackParams_t* param
 void ANCSClient::hvxCallback(const GattHVXCallbackParams* params)
 {
     // check that the message belongs to this connection and characteristic
-    if ((params->connHandle == connectionHandle) && (params->handle == notificationSource.getValueHandle()))
+    if ((params->connHandle == connectionHandle) &&
+        (params->handle == notificationSource.getValueHandle()) &&
+        (notificationHandler))
     {
+        // parse data to notification event
         Notification_t event;
         event.eventID = params->data[0];
         event.eventFlags = params->data[1];
@@ -396,7 +406,9 @@ void ANCSClient::hvxCallback(const GattHVXCallbackParams* params)
 
         event.notificationUID = uid;
 
-        if (notificationHandler)
+        // only process newly added notifications that are not silent
+        if ((event.eventID == ANCSClient::EventIDNotificationAdded) &&
+            !(event.eventFlags & ANCSClient::EventFlagSilent))
         {
             minar::Scheduler::postCallback(notificationHandler.bind(event));
         }
